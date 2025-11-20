@@ -2,10 +2,11 @@ import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { LanguageSelector, type LanguageCode } from "./LanguageSelector";
-import { Loader2, ArrowRight, Code2, Search, HandMetal } from "lucide-react";
+import { Loader2, ArrowRight, Code2, Search, HandMetal, Maximize2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SyncedCodeEditors } from "./SyncedCodeEditors";
+import { FullscreenTranslationMode } from "./FullscreenTranslationMode";
 
 import { useLanguage } from "@/contexts/LanguageContext";
 import { translations } from "@/lib/translations";
@@ -31,6 +32,7 @@ export const TranslationForm = () => {
   const [selectedSegmentIndex, setSelectedSegmentIndex] = useState<number | null>(null);
   const [isManualMode, setIsManualMode] = useState(false);
   const [translationProgress, setTranslationProgress] = useState({ current: 0, total: 0 });
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const { toast } = useToast();
 
   const analyzeCode = () => {
@@ -225,9 +227,35 @@ export const TranslationForm = () => {
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-6">
-      <Card className="p-6 shadow-card hover:shadow-glow transition-all duration-300">
-        <SyncedCodeEditors
+    <>
+      {isFullscreen && (
+        <FullscreenTranslationMode
+          initialCode={input}
+          highlightedSegments={highlightedSegments}
+          onClose={() => setIsFullscreen(false)}
+          onSegmentClick={(index) => {
+            setSelectedSegmentIndex(selectedSegmentIndex === index ? null : index);
+          }}
+          selectedSegmentIndex={selectedSegmentIndex}
+        />
+      )}
+
+      <div className="w-full max-w-7xl mx-auto space-y-6">
+        <Card className="p-6 shadow-card hover:shadow-glow transition-all duration-300 relative">
+          {/* Fullscreen Button */}
+          {input.trim() && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsFullscreen(true)}
+              className="absolute top-4 right-4 z-10 hover:bg-primary/10"
+              title={language === 'ar' ? 'وضع ملء الشاشة' : 'Fullscreen Mode'}
+            >
+              <Maximize2 className="h-5 w-5" />
+            </Button>
+          )}
+
+          <SyncedCodeEditors
           inputValue={input}
           outputValue={translatedContent}
           onInputChange={(value) => {
@@ -318,7 +346,8 @@ export const TranslationForm = () => {
             </Button>
           </>
         )}
-      </Card>
-    </div>
+        </Card>
+      </div>
+    </>
   );
 };
