@@ -101,10 +101,10 @@ export const SplitViewEditor = ({
 
   return (
     <div className="h-full flex flex-col">
-      {/* Language Tabs */}
+      {/* Language Tabs - Always show for multiple languages */}
       {targetLangs.length > 1 && (
-        <div className="border-b border-border bg-card/50 px-4 py-2">
-          <div className="flex items-center gap-2 overflow-x-auto">
+        <div className="border-b border-border bg-card/50 px-4 py-2.5">
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-thin">
             {targetLangs.map((langCode) => {
               const lang = LANGUAGES.find(l => l.code === langCode);
               if (!lang) return null;
@@ -114,10 +114,10 @@ export const SplitViewEditor = ({
                   variant={selectedLang === langCode ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => setSelectedLang(langCode)}
-                  className="gap-2 shrink-0"
+                  className="gap-2 shrink-0 transition-all"
                 >
-                  <span>{lang.flag}</span>
-                  <span className="text-xs">{lang.nativeName}</span>
+                  <span className="text-base">{lang.flag}</span>
+                  <span className="text-xs font-medium">{lang.nativeName}</span>
                 </Button>
               );
             })}

@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { LanguageSelector, type LanguageCode } from "./LanguageSelector";
@@ -6,7 +7,6 @@ import { Loader2, ArrowRight, Code2, Search, HandMetal, Maximize2 } from "lucide
 import { useToast } from "@/hooks/use-toast";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SyncedCodeEditors } from "./SyncedCodeEditors";
-import { FullscreenTranslationMode } from "./FullscreenTranslationMode";
 
 import { useLanguage } from "@/contexts/LanguageContext";
 import { translations } from "@/lib/translations";
@@ -19,6 +19,7 @@ interface HighlightedSegment {
 }
 
 export const TranslationForm = () => {
+  const navigate = useNavigate();
   const { language } = useLanguage();
   const t = translations.form[language];
   const tEditor = translations.editor[language];
@@ -32,7 +33,6 @@ export const TranslationForm = () => {
   const [selectedSegmentIndex, setSelectedSegmentIndex] = useState<number | null>(null);
   const [isManualMode, setIsManualMode] = useState(false);
   const [translationProgress, setTranslationProgress] = useState({ current: 0, total: 0 });
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const { toast } = useToast();
 
   const analyzeCode = () => {
@@ -226,34 +226,37 @@ export const TranslationForm = () => {
     setTranslationProgress({ current: 0, total: 0 });
   };
 
-  return (
-    <>
-      {isFullscreen && (
-        <FullscreenTranslationMode
-          initialCode={input}
-          highlightedSegments={highlightedSegments}
-          onClose={() => setIsFullscreen(false)}
-          onSegmentClick={(index) => {
-            setSelectedSegmentIndex(selectedSegmentIndex === index ? null : index);
-          }}
-          selectedSegmentIndex={selectedSegmentIndex}
-        />
-      )}
+  const handleFullscreen = () => {
+    if (!input.trim()) {
+      toast({
+        title: language === 'ar' ? "خطأ" : "Error",
+        description: language === 'ar' ? "الرجاء إدخال الكود أولاً" : "Please enter code first",
+        variant: "destructive",
+      });
+      return;
+    }
 
-      <div className="w-full max-w-7xl mx-auto space-y-6">
-        <Card className="p-6 shadow-card hover:shadow-glow transition-all duration-300 relative">
-          {/* Fullscreen Button */}
-          {input.trim() && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setIsFullscreen(true)}
-              className="absolute top-4 right-4 z-10 hover:bg-primary/10"
-              title={language === 'ar' ? 'وضع ملء الشاشة' : 'Fullscreen Mode'}
-            >
-              <Maximize2 className="h-5 w-5" />
-            </Button>
-          )}
+    navigate('/translate', {
+      state: {
+        initialCode: input,
+        highlightedSegments: highlightedSegments
+      }
+    });
+  };
+
+  return (
+    <div className="w-full max-w-7xl mx-auto space-y-6">
+      <Card className="p-6 shadow-card hover:shadow-glow transition-all duration-300 relative">
+        {/* Fullscreen Button - Always Visible */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleFullscreen}
+          className="absolute top-4 right-4 z-10 hover:bg-primary/10"
+          title={language === 'ar' ? 'وضع ملء الشاشة' : 'Fullscreen Mode'}
+        >
+          <Maximize2 className="h-5 w-5" />
+        </Button>
 
           <SyncedCodeEditors
           inputValue={input}
@@ -345,9 +348,8 @@ export const TranslationForm = () => {
               )}
             </Button>
           </>
-        )}
+          )}
         </Card>
       </div>
-    </>
   );
 };
