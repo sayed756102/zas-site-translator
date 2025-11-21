@@ -18,6 +18,29 @@ interface TranslationResponse {
   error?: string;
 }
 
+// RTL languages list
+const RTL_LANGUAGES = ['Arabic', 'العربية', 'Hebrew', 'עברית', 'Persian', 'فارسی', 'Urdu', 'اردو'];
+
+// Post-processing function to ensure dir="rtl" for RTL languages
+function ensureRTLDirective(code: string, targetLang: string): string {
+  const isRTL = RTL_LANGUAGES.some(lang => targetLang.toLowerCase().includes(lang.toLowerCase()));
+  
+  if (!isRTL) return code;
+  
+  // Check if HTML contains lang attribute for RTL without dir="rtl"
+  const htmlTagRegex = /<html([^>]*lang=["'](ar|he|fa|ur)["'][^>]*)>/i;
+  const match = code.match(htmlTagRegex);
+  
+  if (match && !match[1].includes('dir=')) {
+    // Add dir="rtl" to the html tag
+    return code.replace(htmlTagRegex, (fullMatch, attrs) => {
+      return `<html${attrs} dir="rtl">`;
+    });
+  }
+  
+  return code;
+}
+
 // Primary: Groq Cloud (السرعة)
 async function translateWithGroq(code: string, sourceLang: string, targetLang: string): Promise<string> {
   const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY');
@@ -36,8 +59,27 @@ async function translateWithGroq(code: string, sourceLang: string, targetLang: s
       messages: [
         {
           role: 'system',
-          content: `أنت مترجم كود احترافي. ترجم النصوص القابلة للترجمة فقط من ${sourceLang} إلى ${targetLang}. حافظ على:
-- أسماء المتغيرات والدوال والكلاسات كما هي
+          content: `أنت مترجم كود احترافي. ترجم النصوص القابلة للترجمة فقط من ${sourceLang} إلى ${targetLang}.
+
+**قواعد مهمة للترجمة:**
+
+✅ ترجم فقط:
+- النصوص المرئية للمستخدم داخل tags
+- محتوى placeholder، title، alt
+
+❌ لا تترجم أبداً:
+- محتوى href (الروابط الداخلية والخارجية)
+- محتوى id (المعرفات)
+- محتوى class (الفئات)
+- محتوى src (مصادر الملفات)
+- أسماء المتغيرات والدوال
+- أي HTML/CSS/JS attributes تقنية
+
+🔄 إذا كانت الترجمة للعربية أو أي لغة RTL:
+- أضف dir="rtl" مع lang في tag الـ <html>
+- مثال: <html lang="ar" dir="rtl">
+
+حافظ على:
 - بنية الكود وتنسيقه
 - التعليقات البرمجية
 - أكواد HTML/CSS/JS السليمة`
@@ -76,8 +118,27 @@ async function translateWithGoogle(code: string, sourceLang: string, targetLang:
       body: JSON.stringify({
         contents: [{
           parts: [{
-            text: `أنت مترجم كود احترافي. ترجم النصوص القابلة للترجمة فقط من ${sourceLang} إلى ${targetLang}. حافظ على:
-- أسماء المتغيرات والدوال والكلاسات كما هي
+            text: `أنت مترجم كود احترافي. ترجم النصوص القابلة للترجمة فقط من ${sourceLang} إلى ${targetLang}.
+
+**قواعد مهمة للترجمة:**
+
+✅ ترجم فقط:
+- النصوص المرئية للمستخدم داخل tags
+- محتوى placeholder، title، alt
+
+❌ لا تترجم أبداً:
+- محتوى href (الروابط الداخلية والخارجية)
+- محتوى id (المعرفات)
+- محتوى class (الفئات)
+- محتوى src (مصادر الملفات)
+- أسماء المتغيرات والدوال
+- أي HTML/CSS/JS attributes تقنية
+
+🔄 إذا كانت الترجمة للعربية أو أي لغة RTL:
+- أضف dir="rtl" مع lang في tag الـ <html>
+- مثال: <html lang="ar" dir="rtl">
+
+حافظ على:
 - بنية الكود وتنسيقه
 - التعليقات البرمجية
 - أكواد HTML/CSS/JS السليمة
@@ -127,8 +188,27 @@ async function translateWithCloudflare(code: string, sourceLang: string, targetL
         messages: [
           {
             role: 'system',
-            content: `You are a professional code translator. Translate only translatable text from ${sourceLang} to ${targetLang}. Preserve:
-- Variable, function, and class names
+            content: `You are a professional code translator. Translate only translatable text from ${sourceLang} to ${targetLang}.
+
+**Important Translation Rules:**
+
+✅ Translate ONLY:
+- User-visible text inside tags
+- Content of placeholder, title, alt attributes
+
+❌ NEVER translate:
+- Content of href (internal and external links)
+- Content of id (identifiers)
+- Content of class (CSS classes)
+- Content of src (file sources)
+- Variable and function names
+- Any technical HTML/CSS/JS attributes
+
+🔄 If translating to Arabic or any RTL language:
+- Add dir="rtl" with lang in <html> tag
+- Example: <html lang="ar" dir="rtl">
+
+Preserve:
 - Code structure and formatting
 - Code comments
 - Valid HTML/CSS/JS syntax`
@@ -155,7 +235,8 @@ async function translateWithCloudflare(code: string, sourceLang: string, targetL
 async function translateCode(code: string, sourceLang: string, targetLang: string): Promise<TranslationResponse> {
   // Try Groq first (Primary - Speed)
   try {
-    const translatedCode = await translateWithGroq(code, sourceLang, targetLang);
+    let translatedCode = await translateWithGroq(code, sourceLang, targetLang);
+    translatedCode = ensureRTLDirective(translatedCode, targetLang);
     console.log('✅ Groq translation successful');
     return {
       translatedCode,
@@ -167,7 +248,8 @@ async function translateCode(code: string, sourceLang: string, targetLang: strin
 
     // Try Google AI Studio (Secondary - Accuracy)
     try {
-      const translatedCode = await translateWithGoogle(code, sourceLang, targetLang);
+      let translatedCode = await translateWithGoogle(code, sourceLang, targetLang);
+      translatedCode = ensureRTLDirective(translatedCode, targetLang);
       console.log('✅ Google AI translation successful (fallback)');
       return {
         translatedCode,
@@ -179,7 +261,8 @@ async function translateCode(code: string, sourceLang: string, targetLang: strin
 
       // Try Cloudflare Workers AI (Tertiary - Emergency)
       try {
-        const translatedCode = await translateWithCloudflare(code, sourceLang, targetLang);
+        let translatedCode = await translateWithCloudflare(code, sourceLang, targetLang);
+        translatedCode = ensureRTLDirective(translatedCode, targetLang);
         console.log('✅ Cloudflare AI translation successful (emergency fallback)');
         return {
           translatedCode,
