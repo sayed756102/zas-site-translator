@@ -14,6 +14,7 @@ const AuthPage = () => {
   const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showVerificationMessage, setShowVerificationMessage] = useState(false);
   const { user, signIn, signUp } = useAuth();
   const navigate = useNavigate();
 
@@ -39,6 +40,7 @@ const AuthPage = () => {
     const { error } = await signUp(email, password, username, fullName);
     setLoading(false);
     if (!error) {
+      setShowVerificationMessage(true);
       setEmail('');
       setPassword('');
       setUsername('');
@@ -48,6 +50,21 @@ const AuthPage = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-4">
+      {showVerificationMessage && (
+        <Card className="w-full max-w-md mb-4 border-primary/50 bg-primary/5">
+          <CardContent className="pt-6">
+            <div className="text-center space-y-2">
+              <h3 className="text-lg font-semibold text-primary">تحقق من بريدك الإلكتروني</h3>
+              <p className="text-sm text-muted-foreground">
+                تم إرسال رابط التحقق إلى بريدك الإلكتروني. يرجى فتح البريد والنقر على الرابط لتفعيل حسابك.
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Check your email - A verification link has been sent to complete your registration.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-3xl font-bold gradient-text">ZAS</CardTitle>
