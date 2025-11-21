@@ -9,6 +9,7 @@ import { type LanguageCode } from "@/components/LanguageSelector";
 import { MultiLanguageSelector } from "@/components/MultiLanguageSelector";
 import { SplitViewEditor } from "@/components/SplitViewEditor";
 import { CodeEditor } from "@/components/CodeEditor";
+import { supabase } from "@/integrations/supabase/client";
 
 interface HighlightedSegment {
   text: string;
@@ -81,30 +82,59 @@ const TranslatePage = () => {
     }
 
     setIsTranslating(true);
-    const translatableSegments = highlightedSegments.filter((seg: HighlightedSegment) => seg.isTranslatable);
-    setTranslationProgress({ current: 0, total: translatableSegments.length * targetLangs.length });
+    setTranslationProgress({ current: 0, total: targetLangs.length });
     
-    // TODO: Add your translation API here
-    // Simulate translation for now
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    // Mock translated content
-    const mockTranslations: Partial<Record<LanguageCode, string>> = {};
-    targetLangs.forEach(lang => {
-      mockTranslations[lang] = `/* Translated to ${lang} */\n${initialCode}`;
-    });
-    
-    setTranslatedContent(mockTranslations);
-    setShowSplitView(true);
-    setIsTranslating(false);
-    setTranslationProgress({ current: 0, total: 0 });
-    
-    toast({
-      title: language === 'ar' ? "تمت الترجمة!" : "Translation Complete!",
-      description: language === 'ar' 
-        ? `تمت الترجمة إلى ${targetLangs.length} لغة` 
-        : `Translated to ${targetLangs.length} language(s)`,
-    });
+    try {
+      // Call Edge Function with three-tier fallback system
+      const { data, error } = await supabase.functions.invoke('translate-code', {
+        body: {
+          code: initialCode,
+          sourceLang,
+          targetLang: translationMode === 'multi' ? targetLangs : targetLangs[0],
+        },
+      });
+
+      if (error) throw error;
+
+      // Handle multi-language response
+      if (translationMode === 'multi' && data.translations) {
+        const newTranslations: Partial<Record<LanguageCode, string>> = {};
+        data.translations.forEach((result: any, index: number) => {
+          if (result.success) {
+            newTranslations[targetLangs[index]] = result.translatedCode;
+            setTranslationProgress(prev => ({ ...prev, current: index + 1 }));
+          }
+        });
+        setTranslatedContent(newTranslations);
+      } 
+      // Handle single-language response
+      else if (data.success) {
+        setTranslatedContent({ [targetLangs[0]]: data.translatedCode });
+      } else {
+        throw new Error(data.error || 'Translation failed');
+      }
+
+      setShowSplitView(true);
+      setTranslationProgress({ current: 0, total: 0 });
+      
+      toast({
+        title: language === 'ar' ? "تمت الترجمة!" : "Translation Complete!",
+        description: language === 'ar' 
+          ? `تمت الترجمة إلى ${targetLangs.length} لغة بواسطة ${data.provider || 'AI'}` 
+          : `Translated to ${targetLangs.length} language(s) via ${data.provider || 'AI'}`,
+      });
+    } catch (error) {
+      console.error('Translation error:', error);
+      toast({
+        title: language === 'ar' ? "خطأ في الترجمة" : "Translation Error",
+        description: error instanceof Error ? error.message : language === 'ar' 
+          ? "حدث خطأ أثناء الترجمة. يرجى المحاولة مرة أخرى." 
+          : "An error occurred during translation. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsTranslating(false);
+    }
   };
 
   return (
