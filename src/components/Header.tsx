@@ -1,11 +1,10 @@
-import { Moon, Sun, Languages, Sparkles, MoreVertical, HelpCircle, LogOut, User, History } from 'lucide-react';
+import { Moon, Sun, Languages, MoreVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from 'next-themes';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useAuth } from '@/contexts/AuthContext';
 import { LANGUAGES, type LanguageCode } from '@/components/LanguageSelector';
 import { translations } from '@/lib/translations';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,19 +26,11 @@ import logo from '@/assets/logo.png';
 export const Header = () => {
   const { theme, setTheme } = useTheme();
   const { language, setLanguage } = useLanguage();
-  const { user, signOut } = useAuth();
-  const location = useLocation();
-  const navigate = useNavigate();
   const t = translations.nav[language];
   const policies = translations.policies[language];
   const [openPolicy, setOpenPolicy] = useState<string | null>(null);
 
   const currentLanguage = LANGUAGES.find((lang) => lang.code === language);
-
-  const handleSignOut = async () => {
-    await signOut();
-    navigate('/');
-  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -142,42 +133,6 @@ export const Header = () => {
             <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
             <span className="sr-only">Toggle theme</span>
           </Button>
-
-          {user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon">
-                  <User className="h-5 w-5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem disabled className="font-semibold">
-                  {user.email}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate('/profile')}>
-                  <User className="ml-2 h-4 w-4" />
-                  {language === 'ar' ? 'الملف الشخصي' : 'Profile'}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate('/history')}>
-                  <History className="ml-2 h-4 w-4" />
-                  {language === 'ar' ? 'سجل الترجمات' : 'History'}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut className="ml-2 h-4 w-4" />
-                  {language === 'ar' ? 'تسجيل الخروج' : 'Sign Out'}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <Link to="/auth">
-              <Button variant="default">
-                <User className="ml-2 h-4 w-4" />
-                {language === 'ar' ? 'تسجيل الدخول' : 'Sign In'}
-              </Button>
-            </Link>
-          )}
         </div>
       </div>
     </header>

@@ -10,15 +10,12 @@ import { SyncedCodeEditors } from "./SyncedCodeEditors";
 import { MultiLanguageSelector } from "./MultiLanguageSelector";
 import { SplitViewEditor } from "./SplitViewEditor";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
-
 import { useLanguage } from "@/contexts/LanguageContext";
 import { translations } from "@/lib/translations";
 
 
 export const TranslationForm = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
   const { language } = useLanguage();
   const t = translations.form[language];
   const tEditor = translations.editor[language];
@@ -74,31 +71,6 @@ export const TranslationForm = () => {
 
       setShowSplitView(true);
       setTranslationProgress({ current: 0, total: 0 });
-      
-      // Save to history if user is logged in
-      if (user) {
-        const translatedData = translationMode === 'multi' 
-          ? Object.fromEntries(Object.entries(translatedContent))
-          : { [targetLangs[0]]: translatedContent[targetLangs[0]] };
-
-        try {
-          await supabase.from('translation_history').insert({
-            user_id: user.id,
-            source_code: input,
-            source_lang: sourceLang,
-            target_langs: targetLangs,
-            translated_content: translationMode === 'multi' 
-              ? Object.fromEntries(
-                  data.translations
-                    .filter((r: any) => r.success)
-                    .map((r: any, i: number) => [targetLangs[i], r.translatedCode])
-                )
-              : { [targetLangs[0]]: data.translatedCode },
-          });
-        } catch (saveError) {
-          console.error('Error saving to history:', saveError);
-        }
-      }
       
       toast({
         title: language === 'ar' ? "تمت الترجمة!" : "Translation Complete!",
