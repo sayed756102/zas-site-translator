@@ -7,8 +7,8 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string, username: string, fullName: string) => Promise<{ error: any }>;
-  signIn: (email: string, password: string) => Promise<{ error: any }>;
+  signInWithGoogle: () => Promise<void>;
+  signInWithGithub: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -40,51 +40,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (email: string, password: string, username: string, fullName: string) => {
+  const signInWithGoogle = async () => {
     try {
-      const redirectUrl = `${window.location.origin}/`;
-      
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
         options: {
-          emailRedirectTo: redirectUrl,
-          data: {
-            username,
-            full_name: fullName,
-          }
+          redirectTo: `${window.location.origin}/`,
         }
-      });
-
-      if (error) {
-        toast({
-          variant: "destructive",
-          title: "خطأ في التسجيل",
-          description: error.message,
-        });
-      } else {
-        toast({
-          title: "تم التسجيل بنجاح!",
-          description: "يمكنك الآن تسجيل الدخول",
-        });
-      }
-
-      return { error };
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "خطأ",
-        description: error.message,
-      });
-      return { error };
-    }
-  };
-
-  const signIn = async (email: string, password: string) => {
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
       });
 
       if (error) {
@@ -93,21 +55,38 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           title: "خطأ في تسجيل الدخول",
           description: error.message,
         });
-      } else {
-        toast({
-          title: "مرحباً بك!",
-          description: "تم تسجيل الدخول بنجاح",
-        });
       }
-
-      return { error };
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "خطأ",
         description: error.message,
       });
-      return { error };
+    }
+  };
+
+  const signInWithGithub = async () => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'github',
+        options: {
+          redirectTo: `${window.location.origin}/`,
+        }
+      });
+
+      if (error) {
+        toast({
+          variant: "destructive",
+          title: "خطأ في تسجيل الدخول",
+          description: error.message,
+        });
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "خطأ",
+        description: error.message,
+      });
     }
   };
 
@@ -128,7 +107,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signUp, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, signInWithGoogle, signInWithGithub, signOut }}>
       {children}
     </AuthContext.Provider>
   );
