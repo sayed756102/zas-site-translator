@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { DOMParser } from "https://esm.sh/linkedom@0.16.10";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,35 +19,142 @@ interface TranslationResponse {
   error?: string;
 }
 
-// RTL languages list
-const RTL_LANGUAGES = ['Arabic', 'العربية', 'Hebrew', 'עברית', 'Persian', 'فارسی', 'Urdu', 'اردو'];
+interface TextNode {
+  type: 'text' | 'attribute';
+  text: string;
+  path: string; // XPath-like identifier
+  attributeName?: string;
+}
 
-// Post-processing function to ensure dir="rtl" for RTL languages
-function ensureRTLDirective(code: string, targetLang: string): string {
-  const isRTL = RTL_LANGUAGES.some(lang => targetLang.toLowerCase().includes(lang.toLowerCase()));
-  
-  if (!isRTL) return code;
-  
-  // Check if HTML contains lang attribute for RTL without dir="rtl"
-  const htmlTagRegex = /<html([^>]*lang=["'](ar|he|fa|ur)["'][^>]*)>/i;
-  const match = code.match(htmlTagRegex);
-  
-  if (match && !match[1].includes('dir=')) {
-    // Add dir="rtl" to the html tag
-    return code.replace(htmlTagRegex, (fullMatch, attrs) => {
-      return `<html${attrs} dir="rtl">`;
-    });
+// RTL languages list
+const RTL_LANGUAGES = ['arabic', 'عربية', 'hebrew', 'עברית', 'persian', 'فارسی', 'urdu', 'اردو', 'ar', 'he', 'fa', 'ur'];
+
+// Translatable attributes
+const TRANSLATABLE_ATTRIBUTES = ['placeholder', 'title', 'alt', 'aria-label', 'aria-description'];
+
+// Tags to ignore completely
+const IGNORE_TAGS = ['SCRIPT', 'STYLE', 'CODE', 'PRE'];
+
+/**
+ * Extract all translatable texts from HTML
+ * Returns array of TextNode objects with their locations
+ */
+function extractTexts(html: string): TextNode[] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const texts: TextNode[] = [];
+  let nodeIndex = 0;
+
+  function traverse(node: any, path: string) {
+    // Skip ignored tags
+    if (node.nodeType === 1 && IGNORE_TAGS.includes(node.tagName)) {
+      return;
+    }
+
+    // Extract text nodes
+    if (node.nodeType === 3) { // Text node
+      const text = node.textContent?.trim();
+      if (text && text.length > 0) {
+        texts.push({
+          type: 'text',
+          text: text,
+          path: `${path}[${nodeIndex}]`,
+        });
+        nodeIndex++;
+      }
+    }
+
+    // Extract translatable attributes
+    if (node.nodeType === 1) { // Element node
+      TRANSLATABLE_ATTRIBUTES.forEach(attr => {
+        const value = node.getAttribute(attr);
+        if (value && value.trim().length > 0) {
+          texts.push({
+            type: 'attribute',
+            text: value.trim(),
+            path: `${path}[${nodeIndex}]`,
+            attributeName: attr,
+          });
+          nodeIndex++;
+        }
+      });
+
+      // Traverse children
+      node.childNodes.forEach((child: any, index: number) => {
+        traverse(child, `${path}/${node.tagName}[${index}]`);
+      });
+    }
   }
-  
-  return code;
+
+  traverse(doc.documentElement, '');
+  return texts;
+}
+
+/**
+ * Inject translated texts back into HTML
+ * Uses the paths to find exact locations
+ */
+function injectTexts(html: string, originalTexts: TextNode[], translatedTexts: string[]): string {
+  if (originalTexts.length !== translatedTexts.length) {
+    throw new Error('Mismatch between original and translated texts count');
+  }
+
+  let result = html;
+
+  // Replace texts in reverse order to maintain indices
+  for (let i = originalTexts.length - 1; i >= 0; i--) {
+    const original = originalTexts[i];
+    const translated = translatedTexts[i];
+
+    // Simple string replacement (works well for most cases)
+    // For attributes, we need to handle them carefully
+    if (original.type === 'attribute' && original.attributeName) {
+      const attrPattern = new RegExp(
+        `${original.attributeName}=["']${original.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`,
+        'gi'
+      );
+      result = result.replace(attrPattern, `${original.attributeName}="${translated}"`);
+    } else {
+      // For text nodes, find and replace the exact text
+      // We need to be careful not to replace texts in tags or attributes
+      const textPattern = new RegExp(`>${original.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<`, 'g');
+      result = result.replace(textPattern, `>${translated}<`);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Add RTL directive to HTML tag if needed
+ */
+function ensureRTLDirective(html: string, targetLang: string): string {
+  const isRTL = RTL_LANGUAGES.some(lang => 
+    targetLang.toLowerCase().includes(lang.toLowerCase())
+  );
+
+  if (!isRTL) return html;
+
+  // Check if HTML tag exists and add dir="rtl" if missing
+  const htmlTagRegex = /<html([^>]*)>/i;
+  const match = html.match(htmlTagRegex);
+
+  if (match) {
+    const attrs = match[1];
+    if (!attrs.includes('dir=')) {
+      return html.replace(htmlTagRegex, `<html${attrs} dir="rtl">`);
+    }
+  }
+
+  return html;
 }
 
 // Primary: Groq Cloud (السرعة)
-async function translateWithGroq(code: string, sourceLang: string, targetLang: string): Promise<string> {
+async function translateTextsWithGroq(texts: string[], sourceLang: string, targetLang: string): Promise<string[]> {
   const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY');
   if (!GROQ_API_KEY) throw new Error('GROQ_API_KEY not configured');
 
-  console.log(`🚀 Attempting Groq translation: ${sourceLang} → ${targetLang}`);
+  console.log(`🚀 Groq: Translating ${texts.length} texts from ${sourceLang} → ${targetLang}`);
 
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -59,38 +167,23 @@ async function translateWithGroq(code: string, sourceLang: string, targetLang: s
       messages: [
         {
           role: 'system',
-          content: `أنت مترجم كود احترافي. ترجم النصوص القابلة للترجمة فقط من ${sourceLang} إلى ${targetLang}.
+          content: `You are a professional translator. Translate the array of texts from ${sourceLang} to ${targetLang}.
 
-**قواعد مهمة للترجمة:**
-
-✅ ترجم فقط:
-- النصوص المرئية للمستخدم داخل tags
-- محتوى placeholder، title، alt
-
-❌ لا تترجم أبداً:
-- محتوى href (الروابط الداخلية والخارجية)
-- محتوى id (المعرفات)
-- محتوى class (الفئات)
-- محتوى src (مصادر الملفات)
-- أسماء المتغيرات والدوال
-- أي HTML/CSS/JS attributes تقنية
-
-🔄 إذا كانت الترجمة للعربية أو أي لغة RTL:
-- أضف dir="rtl" مع lang في tag الـ <html>
-- مثال: <html lang="ar" dir="rtl">
-
-حافظ على:
-- بنية الكود وتنسيقه
-- التعليقات البرمجية
-- أكواد HTML/CSS/JS السليمة`
+CRITICAL RULES:
+- Return ONLY a JSON array of translated strings
+- Maintain the EXACT SAME array length
+- Preserve HTML entities and special characters
+- Keep formatting like \\n, spaces, etc.
+- Do NOT add any explanation or markdown
+- Output format: ["translated text 1", "translated text 2", ...]`
         },
         {
           role: 'user',
-          content: `ترجم هذا الكود من ${sourceLang} إلى ${targetLang}:\n\n${code}`
+          content: JSON.stringify(texts)
         }
       ],
       temperature: 0.3,
-      max_tokens: 4000,
+      max_tokens: 8000,
     }),
   });
 
@@ -100,15 +193,27 @@ async function translateWithGroq(code: string, sourceLang: string, targetLang: s
   }
 
   const data = await response.json();
-  return data.choices[0].message.content;
+  const content = data.choices[0].message.content.trim();
+  
+  // Parse JSON response
+  try {
+    const parsed = JSON.parse(content);
+    if (!Array.isArray(parsed)) {
+      throw new Error('Response is not an array');
+    }
+    return parsed;
+  } catch (e) {
+    console.error('Failed to parse Groq response:', content);
+    throw new Error('Invalid JSON response from Groq');
+  }
 }
 
 // Secondary: Google AI Studio (الدقة والذكاء)
-async function translateWithGoogle(code: string, sourceLang: string, targetLang: string): Promise<string> {
+async function translateTextsWithGoogle(texts: string[], sourceLang: string, targetLang: string): Promise<string[]> {
   const GOOGLE_AI_API_KEY = Deno.env.get('GOOGLE_AI_API_KEY');
   if (!GOOGLE_AI_API_KEY) throw new Error('GOOGLE_AI_API_KEY not configured');
 
-  console.log(`🛡️ Attempting Google AI translation: ${sourceLang} → ${targetLang}`);
+  console.log(`🛡️ Google AI: Translating ${texts.length} texts from ${sourceLang} → ${targetLang}`);
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GOOGLE_AI_API_KEY}`,
@@ -118,39 +223,23 @@ async function translateWithGoogle(code: string, sourceLang: string, targetLang:
       body: JSON.stringify({
         contents: [{
           parts: [{
-            text: `أنت مترجم كود احترافي. ترجم النصوص القابلة للترجمة فقط من ${sourceLang} إلى ${targetLang}.
+            text: `You are a professional translator. Translate the array of texts from ${sourceLang} to ${targetLang}.
 
-**قواعد مهمة للترجمة:**
+CRITICAL RULES:
+- Return ONLY a JSON array of translated strings
+- Maintain the EXACT SAME array length
+- Preserve HTML entities and special characters
+- Keep formatting like \\n, spaces, etc.
+- Do NOT add any explanation or markdown
+- Output format: ["translated text 1", "translated text 2", ...]
 
-✅ ترجم فقط:
-- النصوص المرئية للمستخدم داخل tags
-- محتوى placeholder، title، alt
-
-❌ لا تترجم أبداً:
-- محتوى href (الروابط الداخلية والخارجية)
-- محتوى id (المعرفات)
-- محتوى class (الفئات)
-- محتوى src (مصادر الملفات)
-- أسماء المتغيرات والدوال
-- أي HTML/CSS/JS attributes تقنية
-
-🔄 إذا كانت الترجمة للعربية أو أي لغة RTL:
-- أضف dir="rtl" مع lang في tag الـ <html>
-- مثال: <html lang="ar" dir="rtl">
-
-حافظ على:
-- بنية الكود وتنسيقه
-- التعليقات البرمجية
-- أكواد HTML/CSS/JS السليمة
-
-الكود المطلوب ترجمته:
-
-${code}`
+Array to translate:
+${JSON.stringify(texts)}`
           }]
         }],
         generationConfig: {
           temperature: 0.3,
-          maxOutputTokens: 4000,
+          maxOutputTokens: 8000,
         }
       }),
     }
@@ -162,11 +251,27 @@ ${code}`
   }
 
   const data = await response.json();
-  return data.candidates[0].content.parts[0].text;
+  const content = data.candidates[0].content.parts[0].text.trim();
+  
+  // Parse JSON response, handling markdown code blocks
+  try {
+    let jsonStr = content;
+    if (content.startsWith('```')) {
+      jsonStr = content.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
+    }
+    const parsed = JSON.parse(jsonStr);
+    if (!Array.isArray(parsed)) {
+      throw new Error('Response is not an array');
+    }
+    return parsed;
+  } catch (e) {
+    console.error('Failed to parse Google response:', content);
+    throw new Error('Invalid JSON response from Google AI');
+  }
 }
 
 // Tertiary: Cloudflare Workers AI (الطوارئ)
-async function translateWithCloudflare(code: string, sourceLang: string, targetLang: string): Promise<string> {
+async function translateTextsWithCloudflare(texts: string[], sourceLang: string, targetLang: string): Promise<string[]> {
   const CLOUDFLARE_ACCOUNT_ID = Deno.env.get('CLOUDFLARE_ACCOUNT_ID');
   const CLOUDFLARE_API_TOKEN = Deno.env.get('CLOUDFLARE_API_TOKEN');
   
@@ -174,7 +279,7 @@ async function translateWithCloudflare(code: string, sourceLang: string, targetL
     throw new Error('Cloudflare credentials not configured');
   }
 
-  console.log(`⚠️ Attempting Cloudflare AI translation: ${sourceLang} → ${targetLang}`);
+  console.log(`⚠️ Cloudflare AI: Translating ${texts.length} texts from ${sourceLang} → ${targetLang}`);
 
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/meta/llama-3.1-8b-instruct`,
@@ -188,34 +293,19 @@ async function translateWithCloudflare(code: string, sourceLang: string, targetL
         messages: [
           {
             role: 'system',
-            content: `You are a professional code translator. Translate only translatable text from ${sourceLang} to ${targetLang}.
+            content: `You are a professional translator. Translate the array of texts from ${sourceLang} to ${targetLang}.
 
-**Important Translation Rules:**
-
-✅ Translate ONLY:
-- User-visible text inside tags
-- Content of placeholder, title, alt attributes
-
-❌ NEVER translate:
-- Content of href (internal and external links)
-- Content of id (identifiers)
-- Content of class (CSS classes)
-- Content of src (file sources)
-- Variable and function names
-- Any technical HTML/CSS/JS attributes
-
-🔄 If translating to Arabic or any RTL language:
-- Add dir="rtl" with lang in <html> tag
-- Example: <html lang="ar" dir="rtl">
-
-Preserve:
-- Code structure and formatting
-- Code comments
-- Valid HTML/CSS/JS syntax`
+CRITICAL RULES:
+- Return ONLY a JSON array of translated strings
+- Maintain the EXACT SAME array length
+- Preserve HTML entities and special characters
+- Keep formatting like \\n, spaces, etc.
+- Do NOT add any explanation
+- Output format: ["translated text 1", "translated text 2", ...]`
           },
           {
             role: 'user',
-            content: `Translate this code from ${sourceLang} to ${targetLang}:\n\n${code}`
+            content: JSON.stringify(texts)
           }
         ],
       }),
@@ -228,58 +318,89 @@ Preserve:
   }
 
   const data = await response.json();
-  return data.result.response;
+  const content = data.result.response.trim();
+  
+  try {
+    const parsed = JSON.parse(content);
+    if (!Array.isArray(parsed)) {
+      throw new Error('Response is not an array');
+    }
+    return parsed;
+  } catch (e) {
+    console.error('Failed to parse Cloudflare response:', content);
+    throw new Error('Invalid JSON response from Cloudflare AI');
+  }
 }
 
-// Three-tier fallback system
+// Scientific translation with three-tier fallback
 async function translateCode(code: string, sourceLang: string, targetLang: string): Promise<TranslationResponse> {
-  // Try Groq first (Primary - Speed)
   try {
-    let translatedCode = await translateWithGroq(code, sourceLang, targetLang);
-    translatedCode = ensureRTLDirective(translatedCode, targetLang);
-    console.log('✅ Groq translation successful');
-    return {
-      translatedCode,
-      provider: 'Groq Cloud',
-      success: true,
-    };
-  } catch (groqError) {
-    console.error('❌ Groq failed:', groqError);
+    // Step 1: Extract texts
+    console.log('📊 Step 1: Extracting texts from HTML...');
+    const textNodes = extractTexts(code);
+    const textsToTranslate = textNodes.map(node => node.text);
+    
+    console.log(`📝 Extracted ${textsToTranslate.length} translatable texts`);
 
-    // Try Google AI Studio (Secondary - Accuracy)
-    try {
-      let translatedCode = await translateWithGoogle(code, sourceLang, targetLang);
-      translatedCode = ensureRTLDirective(translatedCode, targetLang);
-      console.log('✅ Google AI translation successful (fallback)');
+    if (textsToTranslate.length === 0) {
       return {
-        translatedCode,
-        provider: 'Google AI Studio',
+        translatedCode: code,
+        provider: 'None (no texts to translate)',
         success: true,
       };
-    } catch (googleError) {
-      console.error('❌ Google AI failed:', googleError);
+    }
 
-      // Try Cloudflare Workers AI (Tertiary - Emergency)
+    // Step 2: Translate texts (with fallback)
+    let translatedTexts: string[] = [];
+    let provider = '';
+
+    try {
+      translatedTexts = await translateTextsWithGroq(textsToTranslate, sourceLang, targetLang);
+      provider = 'Groq Cloud';
+      console.log('✅ Groq translation successful');
+    } catch (groqError) {
+      console.error('❌ Groq failed:', groqError);
+
       try {
-        let translatedCode = await translateWithCloudflare(code, sourceLang, targetLang);
-        translatedCode = ensureRTLDirective(translatedCode, targetLang);
-        console.log('✅ Cloudflare AI translation successful (emergency fallback)');
-        return {
-          translatedCode,
-          provider: 'Cloudflare Workers AI',
-          success: true,
-        };
-      } catch (cloudflareError) {
-        console.error('❌ All providers failed');
-        const errorMessage = cloudflareError instanceof Error ? cloudflareError.message : 'Unknown error';
-        return {
-          translatedCode: '',
-          provider: 'None',
-          success: false,
-          error: `All translation providers failed. Last error: ${errorMessage}`,
-        };
+        translatedTexts = await translateTextsWithGoogle(textsToTranslate, sourceLang, targetLang);
+        provider = 'Google AI Studio';
+        console.log('✅ Google AI translation successful (fallback)');
+      } catch (googleError) {
+        console.error('❌ Google AI failed:', googleError);
+
+        try {
+          translatedTexts = await translateTextsWithCloudflare(textsToTranslate, sourceLang, targetLang);
+          provider = 'Cloudflare Workers AI';
+          console.log('✅ Cloudflare AI translation successful (emergency fallback)');
+        } catch (cloudflareError) {
+          console.error('❌ All providers failed');
+          throw new Error('All translation providers failed');
+        }
       }
     }
+
+    // Step 3: Inject translated texts back
+    console.log('💉 Step 3: Injecting translated texts back into HTML...');
+    let translatedCode = injectTexts(code, textNodes, translatedTexts);
+
+    // Step 4: Add RTL support if needed
+    translatedCode = ensureRTLDirective(translatedCode, targetLang);
+
+    console.log('✅ Translation complete!');
+    return {
+      translatedCode,
+      provider,
+      success: true,
+    };
+
+  } catch (error) {
+    console.error('❌ Translation failed:', error);
+    return {
+      translatedCode: '',
+      provider: 'None',
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
   }
 }
 
@@ -300,6 +421,7 @@ serve(async (req) => {
 
     // Handle multi-language translation
     if (Array.isArray(targetLang)) {
+      console.log(`🌍 Multi-language translation to ${targetLang.length} languages`);
       const results = await Promise.all(
         targetLang.map(lang => translateCode(code, sourceLang, lang))
       );
@@ -311,6 +433,7 @@ serve(async (req) => {
     }
 
     // Handle single-language translation
+    console.log(`🔄 Single translation: ${sourceLang} → ${targetLang}`);
     const result = await translateCode(code, sourceLang, targetLang);
 
     if (!result.success) {
