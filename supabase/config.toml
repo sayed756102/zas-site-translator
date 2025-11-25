@@ -8,3 +8,4 @@ verify_jwt = false
 
 [functions.send-custom-verification]
 verify_jwt = false
+ 
